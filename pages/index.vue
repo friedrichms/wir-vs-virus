@@ -3,14 +3,21 @@
     <header class="flex justify-between items-center flex-column md:flex-row">
       <hackathon-logo/>
       <app-logo/>
+    </header>
+    <div class="pt-8">
       <div class="flex justify-center">
         <div class="inline-block min-w-s p-4">
+          {{ $t('label.region') }}
           <v-select
             v-model="selectedArea"
             :options="areaOptions"/>
         </div>
+        <div class="inline-block min-w-s p-4">
+          {{ $t('label.language') }}
+          <LanguagePicker/>
+        </div>
       </div>
-    </header>
+    </div>
     <github-corner url="https://github.com/paul-em/wir-vs-virus"/>
     <div class="pt-8">
       <div class="py-4">
@@ -28,12 +35,12 @@
           <kpi-card
             :value="prediction.totalInfected"
             :worst-case-value="worstCasePrediction.totalInfected"
-            label="Infected"
+            :label="this.$t('label.infected')"
             img="maxinfect.png"/>
           <kpi-card
             :value="prediction.totalDeaths"
             :worst-case-value="worstCasePrediction.totalDeaths"
-            label="Deaths"
+            :label="this.$t('label.deaths')"
             img="deaths.png"/>
         </div>
       </div>
@@ -42,7 +49,7 @@
       <div v-if="showAll">
         <line-chart
           v-if="selectedArea"
-          :datasets="[datasets[0], datasets[1], datasets[2], datasets[3]]"
+          :datasets="[datasets['infected'], datasets['infected_prediction'], datasets['deaths'], datasets['deaths_prediction']]"
           :labels="dates"
           :max-value="population"/>
       </div>
@@ -50,26 +57,20 @@
         Infected
         <line-chart
           v-if="selectedArea"
-          :datasets="[datasets[0], datasets[1]]"
+          :datasets="[datasets['infected'], datasets['infected_prediction']]"
           :labels="dates"
           :max-value="population"/>
         Deaths
         <line-chart
           v-if="selectedArea"
-          :datasets="[datasets[2], datasets[3]]"
-          :labels="dates"
-          :max-value="population"/>
-        Recovered
-        <line-chart
-          v-if="selectedArea"
-          :datasets="[datasets[4], datasets[5]]"
+          :datasets="[datasets['deaths'], datasets['deaths_prediction']]"
           :labels="dates"
           :max-value="population"/>
       </div>
       <button
         class="p-3 my-2 text-sm hover:bg-grey-lighter rounded-sm uppercase"
         @click="showAll = !showAll">
-        {{ showAll ? 'Show Separate': 'Show Combinded' }}
+        {{ showAll ? $t('label.show-separate') : $t('label.show-combined') }}
       </button>
     </div>
     <disclaimer-page/>
@@ -88,6 +89,7 @@ import AppLogo from '../components/AppLogo.vue';
 import GithubCorner from '../components/GithubCorner.vue';
 import MeasuresView from '../components/MeasuresView.vue';
 import DisclaimerPage from '../components/DisclaimerPage.vue';
+import LanguagePicker from '../components/LanguagePicker.vue';
 import populations from '../assets/populations';
 
 
@@ -120,17 +122,24 @@ export default {
     MeasuresView,
     DisclaimerPage,
     AppLogo,
+    LanguagePicker,
   },
-  data: () => ({
-    cases: [],
-    measures: [],
-    selectedArea: 'Germany',
-    rValue: 50,
-    showAll: true,
-  }),
+  data() {
+    const initalArea = { label: this.$t('Germany'), key: 'Germany' };
+    return ({
+      cases: [],
+      measures: [],
+      selectedArea: initalArea,
+      rValue: 50,
+      showAll: true,
+    });
+  },
   computed: {
     population() {
-      return populations[this.selectedArea];
+      if (this.selectedArea) {
+        return populations[this.selectedArea.key];
+      }
+      return [];
     },
     areaOptions() {
       const areas = [];
@@ -153,11 +162,14 @@ export default {
       if (missingPopulations.length) {
         console.warn('no population data found for', missingPopulations);
       }
-      return areas;
+      // translate areas
+      const areasTranslated = areas.map(e => ({ label: this.$t(e), key: e }));
+      return areasTranslated;
     },
     areaCases() {
+      const areaKey = this.selectedArea ? this.selectedArea.key : '';
       const items = this.cases
-        .filter(item => item.area && item.area.includes(this.selectedArea));
+        .filter(item => item.area && item.area.includes(areaKey));
       const infected = [];
       const recovered = [];
       const deaths = [];
@@ -200,11 +212,31 @@ export default {
     daySinceOutbreak() {
       return this.areaCases.infected.filter(item => !!item).length;
     },
+    currentlyInfected() {
+      let latestInfected = 0;
+      this.areaCases.infected.forEach((infected) => {
+        if (infected !== null) {
+          latestInfected = infected;
+        }
+      });
+      return latestInfected;
+    },
+    currentlyDeaths() {
+      let latestDeaths = 0;
+      this.areaCases.deaths.forEach((deaths) => {
+        if (deaths !== null) {
+          latestDeaths = deaths;
+        }
+      });
+      return latestDeaths;
+    },
     prediction() {
       return this.$predict({
         rValue: this.rValue,
         population: this.population,
         day: this.daySinceOutbreak,
+        initiallyInfected: this.currentlyInfected,
+        initiallyDeaths: this.currentlyDeaths,
       });
     },
     worstCasePrediction() {
@@ -212,21 +244,23 @@ export default {
         rValue: 100,
         population: this.population,
         day: this.daySinceOutbreak,
+        initiallyInfected: this.currentlyInfected,
+        initiallyDeaths: this.currentlyDeaths,
       });
     },
     deaths() {
       return this.prediction.timelines[this.prediction.timelines.length - 1].deaths;
     },
     datasets() {
-      return [
-        {
-          label: 'Infected',
+      return {
+        infected: {
+          label: this.$t('label.infected'),
           data: this.areaCases.infected,
           backgroundColor: 'rgba(0, 0, 255, 0.2)',
           borderColor: 'rgba(0, 0, 255, 0.8)',
         },
-        {
-          label: 'Infected Prediction',
+        infected_prediction: {
+          label: this.$t('label.infected-prediction'),
           data: this.align(
             this.areaCases.infected,
             this.prediction.timelines.map(item => item.infected),
@@ -234,14 +268,14 @@ export default {
           backgroundColor: 'rgba(0, 0, 255, 0.1)',
           borderColor: 'rgba(0, 0, 255, 0.2)',
         },
-        {
-          label: 'Deaths',
+        deaths: {
+          label: this.$t('label.deaths'),
           data: this.areaCases.deaths,
           backgroundColor: 'rgba(255, 0, 0, 0.2)',
           borderColor: 'rgba(255, 0, 0, 0.8)',
         },
-        {
-          label: 'Deaths Prediction',
+        deaths_prediction: {
+          label: this.$t('label.deaths-prediction'),
           data: this.align(
             this.areaCases.deaths,
             this.prediction.timelines.map(item => item.deaths),
@@ -249,22 +283,7 @@ export default {
           backgroundColor: 'rgba(255, 0, 0, 0.1)',
           borderColor: 'rgba(255, 0, 0, 0.2)',
         },
-        {
-          label: 'Recovered',
-          data: this.areaCases.recovered,
-          backgroundColor: 'rgba(0, 255, 0, 0.2)',
-          borderColor: 'rgba(0, 255, 0, 0.8)',
-        },
-        {
-          label: 'Recovered Prediction',
-          data: this.align(
-            this.areaCases.recovered,
-            this.prediction.timelines.map(item => item.recovered),
-          ),
-          backgroundColor: 'rgba(0, 255, 0, 0.1)',
-          borderColor: 'rgba(0, 255, 0, 0.2)',
-        },
-      ];
+      };
     },
   },
   methods: {
@@ -282,16 +301,13 @@ export default {
     },
     align(actual, predicted) {
       const index = actual.findIndex(item => item === null);
-      const lastValue = actual[index - 2];
-      const cutoffPoint = predicted.findIndex(val => val > lastValue);
-      const used = predicted.slice(cutoffPoint);
       const offset = [];
       for (let i = 0; i < index - 1; i += 1) {
         offset.push(null);
       }
       return [
         ...offset,
-        ...used,
+        ...predicted,
       ];
     },
   },
